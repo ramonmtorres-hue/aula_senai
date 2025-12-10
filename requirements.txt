@@ -1,6 +1,20 @@
+
+# Base do app
 streamlit==1.38.0
+
+# MongoDB + GridFS (GridFS faz parte do pymongo)
 pymongo==4.7.2
 
-Pillow==10.4.0
-scikit-image==0.22.0
+# Stack científico/Imagem — versões compatíveis entre si em Python 3.11
+numpy==1.26.4
+pandas==2.1.4
+scipy==1.11.4
 scikit-learn==1.3.2
+scikit-image==0.22.0
+Pillow==10.4.0
+
+# Utilitários frequentes (opcionais, mas úteis)
+python-dotenv==1.0.1
+requests==2.32.3
+typing-extensions==4.12.2
+tenacity==8.5.0
