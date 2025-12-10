@@ -1,0 +1,6 @@
+
+streamlit
+pymongo
+gridfs
+Pillow
+scikit-image
