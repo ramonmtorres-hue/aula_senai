@@ -1,7 +1,6 @@
-streamlit
-pymongo
-gridfs
-Pillow
-scikit-image
-scikit-learn
-dnspython
+streamlit==1.38.0
+pymongo==4.7.2
+
+Pillow==10.4.0
+scikit-image==0.22.0
+scikit-learn==1.3.2
