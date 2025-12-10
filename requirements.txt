@@ -3,3 +3,5 @@ pymongo
 gridfs
 Pillow
 scikit-image
+scikit-learn
+dnspython
