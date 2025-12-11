@@ -3,7 +3,8 @@
 streamlit==1.38.0
 
 # MongoDB + GridFS (GridFS faz parte do pymongo)
-pymongo==4.7.2
+pymongo
+
 
 # Stack científico/Imagem — versões compatíveis entre si em Python 3.11
 numpy==1.26.4
@@ -18,3 +19,4 @@ python-dotenv==1.0.1
 requests==2.32.3
 typing-extensions==4.12.2
 tenacity==8.5.0
+
