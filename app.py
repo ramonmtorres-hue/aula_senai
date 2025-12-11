@@ -2,34 +2,33 @@
 # app.py
 import os
 import io
-import gridfs
 import numpy as np
 import streamlit as st
 from PIL import Image
 from pymongo import MongoClient
-from bson import ObjectId
+from bson import ObjectId, Binary
+from datetime import datetime
 from skimage import color
 from skimage.transform import resize
 from skimage.feature import hog
 from sklearn.metrics.pairwise import cosine_similarity
 
 # ========== CONFIG ==========
-# Substitua pela sua URI do Atlas:
+# Substitua pela sua URI do Atlas (use & e não &amp;):
 MONGODB_URI = "mongodb+srv://root:root2@cluster0.ops04cu.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=Cluster0"
-DB_NAME = "faces_db"     # chumbado
-COL_FILES = "fs.files"   # chumbado
-COL_CHUNKS = "fs.chunks" # chumbado
+DB_NAME = "faces_db"      # chumbado
+IMAGES_COL = "images"     # nova coleção para armazenar arquivos diretamente
 
 # ========== CONEXÃO ==========
 @st.cache_resource
-def get_fs():
+def get_db():
     client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=30000)
     client.admin.command("ping")  # valida conexão
     db = client[DB_NAME]
-    fs = gridfs.GridFS(db)        # bucket padrão 'fs' (chumbado)
-    return client, db, fs
+    return client, db
 
-client, db, fs = get_fs()
+client, db = get_db()
+col = db[IMAGES_COL]
 
 # ========== UTIL ==========
 def pil_to_bytes(img_pil, format="JPEG"):
@@ -57,29 +56,32 @@ def compute_hog_embedding(img_pil, size=(160, 160)):
     return (feat / norm).tolist()
 
 def list_all_files():
-    return list(db[COL_FILES].find({}).sort("uploadDate", -1))
+    # documentos na coleção IMAGES_COL
+    return list(col.find({}).sort("uploadDate", -1))
 
 def get_file_bytes(file_id):
-    gf = fs.get(ObjectId(file_id))
-    return gf.read()
+    doc = col.find_one({"_id": ObjectId(file_id)}, {"data": 1})
+    if not doc or "data" not in doc:
+        raise FileNotFoundError("Arquivo não encontrado na coleção.")
+    # 'data' é Binary — converte para bytes
+    return bytes(doc["data"])
 
-def save_image_to_gridfs(img_pil, filename):
+def save_image_to_collection(img_pil, filename, content_type="image/jpeg"):
+    # Atenção: limite de 16MB por documento no MongoDB
     emb = compute_hog_embedding(img_pil)
-    data = pil_to_bytes(img_pil)
-    file_id = fs.put(
-        data,
-        filename=filename,
-        content_type="image/jpeg",
-        embedding=emb  # salva o vetor no documento .files
-    )
-    return file_id
+    data = pil_to_bytes(img_pil, format="JPEG")  # força JPEG para reduzir tamanho
+    doc = {
+        "filename": filename,
+        "contentType": content_type,
+        "data": Binary(data),
+        "embedding": emb,
+        "uploadDate": datetime.utcnow(),
+    }
+    res = col.insert_one(doc)
+    return res.inserted_id
 
 def delete_all_files():
-    for doc in db[COL_FILES].find({}, {"_id": 1}):
-        try:
-            fs.delete(doc["_id"])
-        except Exception:
-            pass
+    col.delete_many({})
 
 def find_most_similar(img_pil, top_k=1):
     # embedding da consulta
@@ -91,12 +93,12 @@ def find_most_similar(img_pil, top_k=1):
     for d in docs:
         emb = d.get("embedding")
         if emb is None:
-            # se não existir, computa e atualiza
+            # se não existir, computa e atualiza a doc
             try:
                 data = get_file_bytes(d["_id"])
                 img = Image.open(io.BytesIO(data)).convert("RGB")
                 emb = compute_hog_embedding(img)
-                db[COL_FILES].update_one({"_id": d["_id"]}, {"$set": {"embedding": emb}})
+                col.update_one({"_id": d["_id"]}, {"$set": {"embedding": emb}})
             except Exception:
                 continue
         emb_vec = np.array(emb).reshape(1, -1)
@@ -108,9 +110,9 @@ def find_most_similar(img_pil, top_k=1):
     return candidates[:top_k]
 
 # ========== UI ==========
-st.set_page_config(page_title="Faces GridFS (MongoDB Atlas)", layout="wide")
+st.set_page_config(page_title="Faces (MongoDB Atlas sem GridFS)", layout="wide")
 
-st.title("Galeria & Comparação de Faces (MongoDB Atlas + GridFS)")
+st.title("Galeria & Comparação de Faces (MongoDB Atlas — sem GridFS)")
 
 # Barra de ações
 col_a, col_b, col_c, col_d = st.columns(4)
@@ -126,10 +128,10 @@ with col_d:
 
 if clear:
     delete_all_files()
-    st.success("Banco limpo (fs.files/fs.chunks).")
+    st.success(f"Banco limpo ({IMAGES_COL}).")
     st.experimental_rerun()
 
-# Upload de novas imagens (salvar direto no GridFS)
+# Upload de novas imagens (salvar direto na coleção)
 st.subheader("Enviar novas imagens")
 uploaded = st.file_uploader("Selecione uma ou mais imagens (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
@@ -137,16 +139,17 @@ if uploaded:
     for up in uploaded:
         try:
             img = Image.open(up).convert("RGB")
-            fid = save_image_to_gridfs(img, filename=up.name)
+            # força JPEG para reduzir tamanho e ficar dentro de 16MB
+            fid = save_image_to_collection(img, filename=up.name, content_type="image/jpeg")
             st.success(f"Enviada: {up.name} (id: {fid})")
         except Exception as e:
             st.error(f"Falha ao salvar {up.name}: {e}")
 
 # Galeria (imagens do banco)
-st.subheader("Galeria (imagens no GridFS)")
+st.subheader("Galeria (imagens na coleção)")
 docs = list_all_files()
 if not docs:
-    st.info("Nenhuma imagem no GridFS.")
+    st.info("Nenhuma imagem salva.")
 else:
     # grade 5 colunas
     cols = st.columns(5)
@@ -182,4 +185,6 @@ if btn_compare and query_up:
                     st.image(img, caption=f"{doc.get('filename')} — sim={sim:.3f}", use_container_width=True)
                     st.caption(f"ID: {doc['_id']}")
     except Exception as e:
+
         st.error(f"Erro na comparação: {e}")
+
